@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: GN Support Meta-Build Language Test Fragment
+Bundle-SymbolicName: org.chromium.gnsupport.core.test
+Bundle-Version: 0.1.0.qualifier
+Bundle-Vendor: The Chromium Authors
+Bundle-RequiredExecutionEnvironment: JavaSE-1.7
+Fragment-Host: org.chromium.gnsupport.core;bundle-version="0.1.0"
+Require-Bundle: org.junit;bundle-version="4.11"

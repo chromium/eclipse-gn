@@ -1,0 +1,10 @@
+URL: http://www2.cs.tum.edu/projects/cup/releases/java-cup-bin-11b-20140611.tar.gz
+Version: 0.11b
+License: HPND (http://www2.cs.tum.edu/projects/cup/licence.html)
+License File: LICENSE
+
+Description:
+CUP is an LALR parser generator for Java.
+
+Local Modifications:
+No modifications.

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+   <feature id="org.chromium.gnsupport.feature">
+      <category name="org.chromium.gnsupport.category"/>
+   </feature>
+   <feature id="org.chromium.gnsupport.feature.source">
+      <category name="org.chromium.gnsupport.category"/>
+   </feature>
+   <category-def name="org.chromium.gnsupport.category" label="GN Meta-Build System Support">
+      <description>
+         GN Meta-Build System Language Development Tools
+      </description>
+   </category-def>
+</site>

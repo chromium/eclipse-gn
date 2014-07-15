@@ -1,0 +1,630 @@
+/*
+ * Copyright (c) 2014, The Chromium Authors
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ * 3. Neither the name of the copyright holder nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+
+import org.chromium.gnsupport.core.GnCodeUtil;
+import org.chromium.gnsupport.core.ast.*;
+
+import java_cup.runtime.*;
+import java_cup.runtime.ComplexSymbolFactory.ComplexSymbol;
+import org.eclipse.dltk.ast.*;
+import org.eclipse.dltk.ast.expressions.*;
+import org.eclipse.dltk.ast.references.*;
+import org.eclipse.dltk.ast.statements.*;
+import org.eclipse.dltk.compiler.problem.*;
+
+import java.util.*;
+
+/* Preliminaries to set up and use the scanner.  */
+scan with {: return getScanner().next_token(); :};
+
+parser code {:
+  private IProblemReporter reporter;
+  private String fileName;
+  private int functionDepth = 0;
+  private LinkedList<Set<String>> functionVariablesStack = new LinkedList<Set<String>>();
+  private LinkedList<String> functionNamesStack = new LinkedList<String>();
+  private Set<String> templateNames = new HashSet<String>();
+  Map<ASTNode, TokenLocation> nodeToLocation = new HashMap<ASTNode, TokenLocation>();
+
+  {
+      // For the global scope.
+      functionVariablesStack.push(new HashSet<String>());
+  }
+
+  static class ErrorInfo {
+    final ProblemSeverity severity;
+    final TokenLocation data;
+
+    ErrorInfo(ProblemSeverity severity, TokenLocation data) {
+      this.severity = severity;
+      this.data = data;
+    }
+  }
+
+  static class TokenLocation {
+    final int left;
+    final int right;
+    final int line;
+    final int column;
+
+    static TokenLocation fromComplexSymbol(ComplexSymbol symbol) {
+      return new TokenLocation(symbol.left, symbol.right,
+          symbol.xleft == null ? 0 : symbol.xleft.getLine(),
+          symbol.xleft == null ? 0 : symbol.xleft.getColumn());
+    }
+
+    TokenLocation(int left, int right, int line, int column) {
+      this.left = left;
+      this.right = right;
+      this.line = line;
+      this.column = column;
+    }
+  }
+
+  public GnParser(java.io.Reader input, ComplexSymbolFactory symbolFactory,
+          String fileName, IProblemReporter reporter) {
+      super(new GnLexer(input, symbolFactory), symbolFactory);
+      this.fileName = fileName;
+      this.reporter = reporter;
+  }
+
+  static List<ASTNode> toASTNodeList(List<?> list) {
+      List<ASTNode> result = new ArrayList<ASTNode>(list.size());
+      for (Object obj : list) {
+        result.add((ASTNode) obj);
+      }
+      return result;
+  }
+
+  public void rememberPosition(ASTNode node, Location xleft, Location xright) {
+      nodeToLocation.put(node, new GnParser.TokenLocation(xleft.getOffset(), xright.getOffset(), xleft.getLine(), xleft.getColumn()));
+  }
+
+  public void syntax_error(Symbol token) {
+      report_error("Syntax error", new ErrorInfo(ProblemSeverity.ERROR, TokenLocation.fromComplexSymbol((ComplexSymbol) token)));
+  }
+
+  public void reportErrorForNode(String message, ASTNode node) {
+      report_error(message, new ErrorInfo(ProblemSeverity.ERROR, nodeToLocation.get(node)));
+  }
+
+  public void reportWarningForNode(String message, ASTNode node) {
+      report_error(message, new ErrorInfo(ProblemSeverity.WARNING, nodeToLocation.get(node)));
+  }
+
+  public void report_error(String message, Object object) {
+      if (false == object instanceof ErrorInfo) {
+          super.report_error(message, object);
+          return;
+      }
+
+      if (reporter == null) {
+          return;
+      }
+      ErrorInfo info = (ErrorInfo) object;
+      IProblem problem = new DefaultProblem(fileName, message,
+          IProblemIdentifier.NULL, new String[] {},
+          info.severity, info.data.left, info.data.right, info.data.line, info.data.column);
+
+      reporter.reportProblem(problem);
+  }
+
+  protected void addTemplate(ASTNode node) {
+      if (node instanceof StringLiteral) {
+          templateNames.add(((StringLiteral) node).getValue());
+      }
+  }
+
+  protected boolean isTemplateName(String name) {
+      return templateNames.contains(name);
+  }
+
+  protected void storeVariable(String name) {
+      functionVariablesStack.peek().add(name);
+  }
+
+  protected Reference convertIntoVariableIfNeeded(Reference ref) {
+      if (ref instanceof VariableReference) {
+          return ref;
+      }
+      if (false == ref instanceof SimpleReference) {
+          return ref;
+      }
+      String name = ref.getStringRepresentation();
+      if (GnCodeUtil.isExternVariable(name) || functionVariablesStack.peekLast().contains(name)) {
+          return new VariableReference(ref.start(), ref.end(), name, GnVariableKind.GLOBAL);
+      }
+      for (Iterator<Set<String>> it = functionVariablesStack.iterator(); it.hasNext();) {
+          Set<String> variables = it.next();
+          if (variables.contains(name)) {
+              GnVariableKind kind = it.hasNext() ? GnVariableKind.LOCAL : GnVariableKind.GLOBAL;
+              return new VariableReference(ref.start(), ref.end(), name, kind);
+          }
+      }
+      return ref;
+  }
+
+  protected void enterFunction(String name) {
+      ++functionDepth;
+      functionVariablesStack.push(new HashSet<String>());
+      functionNamesStack.push(name);
+  }
+
+  protected void exitFunction() {
+      if (functionDepth > 0) {
+          --functionDepth;
+          functionVariablesStack.pop();
+          functionNamesStack.pop();
+      }
+  }
+
+  protected boolean isInFunction() {
+      return functionDepth > 0 && !"declare_args".equals(functionNamesStack.peek());
+  }
+
+  protected int error_sync_size() {
+      return 3;
+  }
+:};
+
+terminal INVALID;
+terminal IF, ELSE;
+terminal TRUE, FALSE;
+terminal LPAREN, RPAREN;
+terminal LBRACKET, RBRACKET, COMMA;
+terminal LBRACE, RBRACE;
+terminal DOT;
+terminal Long INTEGER_LITERAL;
+terminal String STRING_LITERAL;
+terminal String IDENTIFIER;
+terminal Integer EQEQ, NOTEQ, GT, GTEQ, LT, LTEQ, ANDAND, OROR;
+terminal Integer EQ, PLUSEQ, MINUSEQ;
+terminal Integer PLUS, MINUS, MULT, DIV, NOT;
+
+non terminal exit_function;
+non terminal ASTNode lparen;
+non terminal ASTListNode file;
+non terminal List<ASTNode> statement_list, statement_list_opt;
+non terminal Statement statement;
+non terminal Block block;
+non terminal GnCondition if;
+non terminal Statement else_opt;
+non terminal GnQualifiedReference qualified_name;
+non terminal Reference simple_name, name;
+non terminal ASTListNode enter_function;
+non terminal Literal literal;
+non terminal Expression expression, gn_list_item, unary_expression, assignment_expression, primary, array_access;
+non terminal Expression
+    assignment, multiplicative_expression, additive_expression, relational_expression,
+    conditional_and_expression, conditional_or_expression, equality_expression;
+non terminal List<Expression> gn_list_items, gn_list_items_opt, gn_list_items_maybe_trailing_comma, gn_list_items_maybe_trailing_comma_opt;
+non terminal GnList gn_list;
+non terminal Integer assignment_operator;
+non terminal GnFunctionCall fun_call;
+non terminal GnMethodDeclaration fun_decl;
+non terminal CallArgumentsList call_arguments;
+
+precedence left PLUS, MINUS, MULT, DIV, OROR, ANDAND, LBRACE, LBRACKET, LPAREN, ELSE;
+precedence left NOT, error;
+precedence right IF;
+
+start with file;
+
+file ::=
+    statement_list_opt:result
+    {:
+        RESULT = new ASTListNode();
+        if (result != null) {
+            RESULT.setChilds(result);
+        }
+    :}
+    ;
+
+statement_list_opt ::=
+    |
+    statement_list:list
+    {: RESULT = list; :}
+    ;
+
+statement_list ::=
+    statement:stmt
+    {:
+        List<ASTNode> result = new ArrayList<ASTNode>();
+        if (stmt != null) {
+          result.add(stmt);
+        }
+        RESULT = result;
+    :}
+    |
+    statement_list:list statement:stmt
+    {:
+        if (stmt != null) {
+          list.add(stmt);
+        }
+        RESULT = list;
+    :}
+    ;
+
+statement ::=
+    block:result
+    {: RESULT = result; :}
+    |
+    if:result
+    {: RESULT = result; :}
+    |
+    assignment:result
+    {: RESULT = result; :}
+    |
+    fun_decl:decl
+    {: RESULT = decl; :}
+    |
+    fun_call:call
+    {: RESULT = call; :}
+    |
+    error
+    ;
+
+block ::=
+    LBRACE statement_list_opt:list RBRACE
+    {:
+        Block block = new Block();
+        if (list != null) {
+            block.acceptStatements(list);
+        }
+        RESULT = block;
+    :}
+    ;
+
+if ::=
+    IF lparen expression:expr RPAREN statement:stmt else_opt:elze
+    {:
+        RESULT = new GnCondition(expr, stmt, elze);
+    :}
+    |
+    IF lparen:lparen RPAREN statement:stmt else_opt:elze
+    {:
+        parser.reportErrorForNode("Expression expected after '('", lparen);
+    :}
+    ;
+
+else_opt ::=
+    |
+    ELSE statement:stmt
+    {: RESULT = stmt; :}
+    ;
+
+gn_list ::=
+    LBRACKET gn_list_items_maybe_trailing_comma_opt:items RBRACKET
+    {: RESULT = new GnList(items); :}
+    |
+    LBRACKET error
+    ;
+
+gn_list_items_maybe_trailing_comma_opt ::=
+    |
+    gn_list_items_maybe_trailing_comma:result
+    {: RESULT = result; :}
+    ;
+
+gn_list_items_maybe_trailing_comma ::=
+    gn_list_items:result
+    {: RESULT = result; :}
+    |
+    gn_list_items:result COMMA
+    {: RESULT = result; :}
+    ;
+
+gn_list_items ::=
+    gn_list_item:item
+    {:
+        List<Expression> result = new ArrayList<Expression>(2);
+        result.add(item);
+        RESULT = result;
+    :}
+    |
+    gn_list_items:items COMMA gn_list_item:item
+    {: items.add(item); RESULT = items; :}
+    ;
+
+gn_list_items_opt ::=
+    |
+    gn_list_items:items
+    {: RESULT = items; :}
+    ;
+
+gn_list_item ::=
+    expression:expr
+    {: RESULT = expr; :}
+    ;
+
+simple_name ::=
+    IDENTIFIER:name
+    {: RESULT = new SimpleReference(namexleft.getOffset(), namexright.getOffset(), name); :}
+    ;
+
+qualified_name ::=
+    name:name DOT simple_name:simple
+    {:
+        Reference ref = parser.convertIntoVariableIfNeeded(name);
+        RESULT = new GnQualifiedReference(ref, (SimpleReference) simple);
+    :}
+    ;
+
+name ::=
+    simple_name:name
+    {: RESULT = name; :}
+    |
+    qualified_name:name
+    {: RESULT = name; :}
+    ;
+
+array_access ::=
+    name:name LBRACKET expression:expr RBRACKET
+    {: RESULT = new GnArrayAccessExpression(name, expr); :}
+    ;
+
+primary ::=
+    LPAREN expression:expr RPAREN
+    {: RESULT = expr; :}
+    |
+    literal:lit
+    {: RESULT = lit; :}
+    |
+    gn_list:list
+    {: RESULT = list; :}
+    |
+    array_access:access
+    {: RESULT = access; :}
+    |
+    fun_call:call
+    {: RESULT = call; :}
+    ;
+
+unary_expression ::=
+    name:name
+    {:
+        RESULT = parser.convertIntoVariableIfNeeded(name);
+    :}
+    |
+    primary:prim
+    {: RESULT = prim; :}
+    |
+    PLUS unary_expression:expr
+    {: RESULT = expr; :}
+    |
+    MINUS unary_expression:expr
+    {: RESULT = new GnUnaryExpression(expr, GnParserSymbols.MINUS); :}
+    |
+    NOT unary_expression:expr
+    {: RESULT = new GnUnaryExpression(expr, GnParserSymbols.NOT); :}
+    ;
+
+multiplicative_expression ::=
+    unary_expression:expr
+    {: RESULT = expr; :}
+    |
+    multiplicative_expression:left MULT unary_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.MULT); :}
+    |
+    multiplicative_expression:left DIV unary_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.DIV); :}
+    ;
+
+additive_expression ::=
+    multiplicative_expression:expr
+    {: RESULT = expr; :}
+    |
+    additive_expression:left PLUS multiplicative_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.PLUS); :}
+    |
+    additive_expression:left MINUS multiplicative_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.MINUS); :}
+    ;
+
+relational_expression ::=
+    additive_expression:expr
+    {: RESULT = expr; :}
+    |
+    relational_expression:left LT additive_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.LT); :}
+    |
+    relational_expression:left GT additive_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.GT); :}
+    |
+    relational_expression:left LTEQ additive_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.LTEQ); :}
+    |
+    relational_expression:left GTEQ additive_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.GTEQ); :}
+    ;
+
+equality_expression ::=
+    relational_expression:expr
+    {: RESULT = expr; :}
+    |
+    equality_expression:left EQEQ relational_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.EQEQ); :}
+    |
+    equality_expression:left NOTEQ relational_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.NOTEQ); :}
+    ;
+
+conditional_and_expression ::=
+    equality_expression:expr
+    {: RESULT = expr; :}
+    |
+    conditional_and_expression:left ANDAND equality_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.ANDAND); :}
+    ;
+
+conditional_or_expression ::=
+    conditional_and_expression:expr
+    {: RESULT = expr; :}
+    |
+    conditional_or_expression:left OROR conditional_and_expression:right
+    {: RESULT = new GnBinaryExpression(left, right, GnParserSymbols.OROR); :}
+    ;
+
+assignment_expression ::=
+    conditional_or_expression:expr
+    {: RESULT = expr; :}
+    |
+    assignment:expr
+    {: RESULT = expr; :}
+    |
+    assignment:expr error
+    {: RESULT = expr; :}
+    ;
+
+assignment ::=
+    simple_name:name assignment_operator:op assignment_expression:expr
+    {:
+        String varName = name.getStringRepresentation();
+        parser.storeVariable(varName);
+        Statement field;
+        if (op == GnParserSymbols.EQ) {
+            int kind = parser.isInFunction() ? GnFieldDeclaration.LOCAL : GnFieldDeclaration.GLOBAL;
+            field = new GnFieldDeclaration(varName, kind, name.start(), name.end(), name.start(), name.end());
+        } else {
+            field = parser.convertIntoVariableIfNeeded(name);
+        }
+        RESULT = new GnAssignmentExpression(field, op, expr);
+    :}
+    |
+    literal:literal assignment_operator:op assignment_expression:expr
+    {:
+        parser.reportErrorForNode("LHS is a literal", literal);
+        RESULT = new GnAssignmentExpression(null, op, expr);
+    :}
+    ;
+
+assignment_operator ::=
+    EQ
+    {: RESULT = GnParserSymbols.EQ; :}
+    |
+    PLUSEQ
+    {: RESULT = GnParserSymbols.PLUSEQ; :}
+    |
+    MINUSEQ
+    {: RESULT = GnParserSymbols.MINUSEQ; :}
+    ;
+
+enter_function ::=
+    simple_name:name LPAREN
+    {:
+        parser.enterFunction(name.getStringRepresentation());
+        RESULT = new ASTListNode();
+        RESULT.addNode(name);
+    :}
+    ;
+
+exit_function ::=
+    /* empty */
+    {: parser.exitFunction() ; :}
+    ;
+
+fun_decl ::=
+    enter_function:enter call_arguments:args RPAREN block:block exit_function
+    {:
+        Reference name = (Reference) enter.getChilds().get(0);
+        String nameString = name.getStringRepresentation();
+        GnMethodDeclaration decl = new GnMethodDeclaration(nameString, name.start(), name.end(), block.start(), block.end());
+        List<ASTNode> children = args.getChilds();
+        List<GnArgument> arguments = new ArrayList<GnArgument>(children.size());
+        for (ASTNode child : children) {
+            arguments.add(new GnArgument(child));
+        }
+        decl.acceptArguments(arguments);
+        decl.acceptBody(block);
+
+        boolean isFirstArgumentString = arguments.size() > 0
+            && arguments.get(0).getActualNode() instanceof StringLiteral;
+        if (GnCodeUtil.isTemplate(nameString) && arguments.size() > 0) {
+            parser.addTemplate(arguments.get(0).getActualNode());
+            decl.setType(GnMethodDeclaration.Type.TEMPLATE);
+        } else if (parser.isTemplateName(nameString)) {
+            decl.setType(GnMethodDeclaration.Type.TEMPLATE_CALL);
+        } else if (isFirstArgumentString) {
+            if (GnCodeUtil.isTarget(nameString)) {
+                decl.setType(GnMethodDeclaration.Type.TARGET);
+            }
+        }
+        RESULT = decl;
+    :}
+    ;
+
+fun_call ::=
+    enter_function:enter call_arguments:args RPAREN exit_function
+    {:
+        RESULT = new GnFunctionCall((Reference) enter.getChilds().get(0), args, null);
+    :}
+    |
+    enter_function:enter error:err exit_function
+    {:
+        RESULT = new GnFunctionCall((Reference) enter.getChilds().get(0), null, null);
+    :}
+    ;
+
+call_arguments ::=
+    gn_list_items_opt:items
+    {:
+        RESULT = new CallArgumentsList();
+        if (items != null) {
+            for (ASTNode item : items) {
+                RESULT.addNode(item);
+            }
+        }
+    :}
+    ;
+
+lparen ::=
+    LPAREN:value
+    {: parser.rememberPosition(RESULT, valuexleft, valuexright); :}
+    ;
+
+literal ::=
+    TRUE
+    {: RESULT = new BooleanLiteral(-1, -1, true); :}
+    |
+    FALSE
+    {: RESULT = new BooleanLiteral(-1, -1, false); :}
+    |
+    INTEGER_LITERAL:value
+    {: RESULT = new NumericLiteral(-1, -1, value); parser.rememberPosition(RESULT, valuexleft, valuexright); :}
+    |
+    STRING_LITERAL:value
+    {: RESULT = new StringLiteral(-1, -1, value); parser.rememberPosition(RESULT, valuexleft, valuexright); :}
+    ;
+
+expression ::=
+    assignment_expression:expr
+    {: RESULT = expr; :}
+    |
+    expression:expr error
+    {: RESULT = expr; :}
+    ;

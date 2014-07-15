@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<!--
+Copyright (c) 2014, The Chromium Authors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-->
+<plugin>
+  <extension point="org.eclipse.dltk.ui.language">
+    <language
+        class="org.chromium.gnsupport.internal.ui.editor.GnUiLanguageToolkit"
+        nature="org.chromium.gnsupport.core.nature"
+        priority="0">
+    </language>
+  </extension>
+
+  <extension point="org.eclipse.ui.editors">
+    <editor
+        name="%editor.name"
+        extensions="gn,gni"
+        icon="icons/gneditor.gif"
+        contributorClass="org.eclipse.dltk.internal.ui.editor.SourceModuleEditorActionContributor"
+        default="true"
+        class="org.chromium.gnsupport.internal.ui.editor.GnEditor"
+        id="org.chromium.gnsupport.GnEditor">
+      <contentTypeBinding contentTypeId="org.chromium.gnsupport.gn.content-type"/>
+    </editor>
+  </extension>
+
+  <extension point="org.eclipse.ui.contexts">
+    <context
+        name="%GnEditContext.name"
+        description="%GnEditContext.description"
+        parentId="org.eclipse.dltk.ui.scriptEditorScope"
+        id="org.chromium.gnsupport.gnEditorScope">
+      </context>
+  </extension>
+
+  <extension
+      point="org.eclipse.ui.menus">
+    <menuContribution
+        allPopups="false"
+        locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+      <command
+          commandId="org.chromium.gnsupport.addGnNature"
+          style="push">
+        <visibleWhen>
+          <iterate ifEmpty="false">
+            <adapt type="org.eclipse.core.resources.IProject">
+              <not>
+                <test
+                    property="org.eclipse.core.resources.projectNature"
+                    value="org.chromium.gnsupport.core.nature"/>
+                </not>
+              </adapt>
+            </iterate>
+        </visibleWhen>
+      </command>
+      <command
+          commandId="org.chromium.gnsupport.removeGnNature"
+          style="push">
+        <visibleWhen>
+          <iterate ifEmpty="false">
+            <adapt type="org.eclipse.core.resources.IProject">
+              <test
+                  property="org.eclipse.core.resources.projectNature"
+                  value="org.chromium.gnsupport.core.nature"/>
+            </adapt>
+          </iterate>
+        </visibleWhen>
+      </command>
+    </menuContribution>
+  </extension>
+
+  <extension point="org.eclipse.ui.commands">
+    <command
+        defaultHandler="org.chromium.gnsupport.internal.ui.commands.AddGnNature"
+        description="%command.add_gn_nature"
+        id="org.chromium.gnsupport.addGnNature"
+        name="%command.add_gn_nature">
+    </command>
+    <command
+        defaultHandler="org.chromium.gnsupport.internal.ui.commands.RemoveGnNature"
+        description="%command.remove_gn_nature"
+        id="org.chromium.gnsupport.removeGnNature"
+        name="%command.remove_gn_nature">
+    </command>
+  </extension>
+
+  <extension
+      point="org.eclipse.core.runtime.preferences">
+    <initializer
+        class="org.chromium.gnsupport.internal.ui.GnUiPreferenceInitializer">
+    </initializer>
+  </extension>
+
+  <extension point="org.eclipse.dltk.ui.scriptCompletionProposalComputer"
+      id="GnCompletionProposalComputer">
+    <scriptCompletionProposalComputer
+        class="org.chromium.gnsupport.internal.ui.text.completion.GnCompletionProposalComputer"
+        categoryId="org.eclipse.dltk.ui.scriptTypeProposalCategory"
+        toolkitId="org.chromium.gnsupport.core.nature">
+        <partition type="__dftl_partition_content_type"/>
+    </scriptCompletionProposalComputer>
+  </extension>
+
+  <extension point="org.eclipse.dltk.ui.completion">
+    <proposalLabelProvider
+        class="org.eclipse.dltk.ui.text.completion.CompletionProposalLabelProvider"
+        nature="org.chromium.gnsupport.core.nature">
+    </proposalLabelProvider>
+  </extension>
+
+  <extension point="org.eclipse.ui.preferencePages">
+    <page
+        class="org.chromium.gnsupport.internal.ui.prefs.GnGlobalPreferencesPage"
+        id="org.chromium.gnsupport.preferences"
+        name="%GnPreferencePage.name"/>
+
+    <page
+        category="org.chromium.gnsupport.preferences"
+        class="org.chromium.gnsupport.internal.ui.prefs.GnEditorPreferencesPage"
+        id="org.chromium.gnsupport.preferences.editor"
+        name="%GnEditorPreferencePage.name"/>
+
+    <page
+        category="org.chromium.gnsupport.preferences.editor"
+        class="org.chromium.gnsupport.internal.ui.prefs.GnEditorSyntaxColoringPreferencePage"
+        id="org.chromium.gnsupport.preferences.editor.syntaxcoloring"
+        name="%GnEditorSyntaxColoringPreferencePage.name"/>
+
+    <page
+        category="org.chromium.gnsupport.preferences.editor"
+        class="org.chromium.gnsupport.internal.ui.prefs.GnEditorMarkOccurrencesPreferencePage"
+        id="org.chromium.gnsupport.preferences.editor.markoccurrences"
+        name="%GnEditorMarkOccurrencesPreferencePage.name"/>
+  </extension>
+
+  <extension point="org.eclipse.dltk.ui.highlighting">
+    <highlighter
+        class="org.chromium.gnsupport.internal.ui.text.GnSemanticUpdateWorker"
+        nature="org.chromium.gnsupport.core.nature">
+    </highlighter>
+  </extension>
+
+  <extension point="org.eclipse.dltk.ui.search">
+    <occurrencesFinder
+        class="org.eclipse.dltk.ui.search.ModelElementOccurrencesFinder"
+        nature="org.chromium.gnsupport.core.nature">
+    </occurrencesFinder>
+  </extension>
+
+</plugin>

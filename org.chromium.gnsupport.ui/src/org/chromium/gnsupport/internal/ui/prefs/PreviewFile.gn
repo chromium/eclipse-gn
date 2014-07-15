@@ -1,0 +1,36 @@
+#
+# Copyright 2014 The Chromium Authors.
+# All rights reserved.
+#
+
+gypi_values = exec_script(
+    "//build/gypi_to_gn.py",
+    [ rebase_path("devtools.gypi") ],
+    "scope",
+    [ "devtools.gypi" ])
+
+numeric = 1234567890
+visibility = "//third_party/WebKit/*"
+debug_devtools = false
+
+template("inline_js_imports") {
+  assert(defined(invoker.input), target_name)
+
+  action(target_name) {
+    script = "scripts/inline_js_imports.py"
+
+    source_prereqs = [ invoker.input ] + invoker.imported_files
+    outputs = [ invoker.output ]
+
+    args = [
+      rebase_path(invoker.input, root_build_dir),
+      rebase_path(invoker.output, root_build_dir),
+    ]
+  }
+}
+
+inline_js_imports("build_module") {
+  input = "front_end/module/Module.js"
+  imported_files = gypi_values.devtools_module_js_files
+  output = "$root_out_dir/resources/inspector/module/Module.js"
+}
