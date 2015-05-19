@@ -34,7 +34,7 @@ the GN language support for Eclipse as well as the source code bundles for the p
 
 This project is in its early alpha stage, and many language features are still unsupported. Also, the GN language itself is still somewhat in flux, so eclipse-gn may often misunderstand the code.
 
-Please report all kinds of issues you encounter at https://github.com/crdev/eclipse-gn/issues/new.
+Please report all kinds of issues you encounter at https://github.com/chromium/eclipse-gn/issues/new.
 
 ##Third-Party Code
 
